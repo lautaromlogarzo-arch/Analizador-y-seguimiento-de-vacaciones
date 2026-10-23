@@ -483,6 +483,37 @@
             const total = vac.expenses.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
             const perPerson = vac.participants.length > 0 ? total / vac.participants.length : 0;
 
+            // --- NUEVO CÓDIGO: Cálculo de balances por persona ---
+            let balancesHtml = '';
+            if (vac.participants.length > 0) {
+                const balances = {};
+                vac.participants.forEach(p => balances[p] = 0);
+                vac.expenses.forEach(exp => {
+                    if (balances[exp.payer] !== undefined) {
+                        balances[exp.payer] += Number(exp.amount || 0);
+                    }
+                });
+
+                balancesHtml = `<div class="mt-4 pt-4 border-t border-slate-800">
+                    <span class="text-slate-400 text-sm mb-3 block">Balance por persona</span>
+                    <div class="space-y-2">`;
+                
+                vac.participants.forEach(p => {
+                    const diff = balances[p] - perPerson;
+                    const sign = diff > 0 ? '+' : (diff < 0 ? '-' : '');
+                    const colorClass = diff > 0 ? 'text-emerald-400' : (diff < 0 ? 'text-rose-400' : 'text-slate-300');
+                    
+                    balancesHtml += `
+                        <div class="flex justify-between items-center text-sm">
+                            <span class="text-slate-300">${escapeHtml(p)}</span>
+                            <span class="font-bold ${colorClass}">${sign}$${Math.abs(diff).toFixed(2)}</span>
+                        </div>
+                    `;
+                });
+                balancesHtml += `</div></div>`;
+            }
+            // -----------------------------------------------------
+
             let optionsHtml = vac.participants.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
 
             let rowsHtml = '';
@@ -550,6 +581,7 @@
                                 <span class="text-slate-400 text-sm">Promedio por persona</span>
                                 <span class="text-lg font-bold text-indigo-400">$${perPerson.toFixed(2)}</span>
                             </div>
+                            ${balancesHtml}
                         </div>
                     </div>
 
