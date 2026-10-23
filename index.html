@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organizador de Vacaciones</title>
+    
+    <!-- Favicon del Avión para la pestaña -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 512'><path fill='%234f46e5' d='M381 114.9L186.1 41.8c-16.7-6.2-35.2-5.3-51.1 2.7L89.1 67.4C78 72.9 72.8 85.9 78.1 97.3c4.5 9.7 16.9 14.3 26.4 9.2l47-24.6 156.4 58.7L25.6 257.6c-13.6 8.3-22 22.9-23.3 38.8s3.5 31.7 13.4 43l94.6 107.2c22.3 25.3 54.3 39.8 88.3 40.2l207.6 2.6c50.2 .6 98.4-18.7 135-52.6l10-9.2c28.6-26.4 46.1-62 49-100.9l2.7-36.4c3.2-42.5-22.9-80.6-62.9-91L381 114.9z'/></svg>">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontInter & FontAwesome icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-50 text-slate-800 h-full flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
+
+    <!-- Toast Notification / Custom Alert Modal -->
+    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Main Container -->
+    <div id="app" class="flex-1 flex flex-col w-full max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        
+        <!-- HEADER -->
+        <header class="flex flex-col sm:flex-row justify-between items-center pb-6 mb-6 border-b border-slate-200 gap-4">
+            <div class="flex items-center gap-3">
+                
+                <!-- LOGO MODIFICADO -->
+                <div class="w-14 h-14 flex items-center justify-center">
+                    <img src="logo_transparente1.png" alt="Mi Logo" class="w-full h-full object-contain">
+                </div>
+                
+                <div>
+                    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Mis Vacaciones</h1>
+                    <p class="text-sm text-slate-500">Planifica, divide gastos y organiza tus viajes</p>
+                </div>
+            </div>
+            <div id="header-actions" class="flex items-center gap-3">
+                <!-- Dynamically populated header actions (e.g. Back button) -->
+            </div>
+        </header>
+
+        <!-- VIEW CONTAINER -->
+        <main class="flex-1 flex flex-col">
+            <!-- Dynamic view will be injected here -->
+        </main>
+    </div>
+
+    <!-- MODAL CONTAINER FOR DAY NOTES OR CREATION -->
+    <div id="modal-root"></div>
+
+    <script>
+        // --- DATA STATE & LOCALSTORAGE ---
+        const STORAGE_KEY = 'vacaciones_app_data_v1';
+
+        function loadData() {
+            const data = localStorage.getItem(STORAGE_KEY);
+            if (!data) {
+                return { currentView: 'home', activeVacationId: null, vacations: [] };
+            }
+            try {
+                return JSON.parse(data);
+            } catch (e) {
+                return { currentView: 'home', activeVacationId: null, vacations: [] };
+            }
+        }
+
+        function saveData(state) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        }
+
+        let appState = loadData();
+
+        // Helper for custom toast notifications instead of alert()
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `pointer-events-auto px-4 py-3 rounded-xl shadow-lg text-white font-medium text-sm flex items-center gap-3 transition-all transform translate-y-2 opacity-0 ${
+                type === 'error' ? 'bg-rose-600' : 'bg-slate-900'
+            }`;
+            toast.innerHTML = `
+                <i class="fa-solid ${type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check'} text-base"></i>
+                <span>${message}</span>
+            `;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 10);
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // --- NAVIGATION & VIEWS ---
+        function render() {
+            const main = document.querySelector('main');
+            const headerActions = document.getElementById('header-actions');
+            main.innerHTML = '';
+            headerActions.innerHTML = '';
+
+            if (appState.currentView === 'home') {
+                renderHomeView(main, headerActions);
+            } else if (appState.currentView === 'create_step1') {
+                renderCreateStep1View(main, headerActions);
+            } else if (appState.currentView === 'create_step2') {
+                renderCreateStep2View(main, headerActions);
+            } else if (appState.currentView === 'vacation_detail') {
+                renderVacationDetailView(main, headerActions);
+            }
+        }
+
+        // 1. HOME VIEW: List of vacations or empty state
+        function renderHomeView(container, headerActions) {
+            headerActions.innerHTML = `
+                <button onclick="startCreateVacation()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-4 py-2.5 rounded-xl shadow-sm shadow-indigo-100 transition flex items-center gap-2 text-sm">
+                    <i class="fa-solid fa-plus"></i> Nueva Vacación
+                </button>
+            `;
+
+            if (appState.vacations.length === 0) {
+                container.innerHTML = `
+                    <div class="flex-1 flex flex-col items-center justify-center p-8 text-center bg-white rounded-3xl border border-dashed border-slate-300 my-auto shadow-sm">
+                        <div class="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-2xl mb-4">
+                            <i class="fa-solid fa-suitcase-rolling"></i>
+                        </div>
+                        <h3 class="text-lg font-bold text-slate-900 mb-1">No hay vacaciones creadas</h3>
+                        <p class="text-sm text-slate-500 max-w-sm mb-6">Empieza creando tu primer viaje para organizar gastos, listas de equipaje y el calendario.</p>
+                        <button onclick="startCreateVacation()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-5 py-3 rounded-2xl shadow-md shadow-indigo-100 transition flex items-center gap-2 text-sm">
+                            <i class="fa-solid fa-plus"></i> Crear mis Vacaciones
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">`;
+            appState.vacations.forEach(vac => {
+                const totalSpent = vac.expenses ? vac.expenses.reduce((acc, curr) => acc + Number(curr.amount || 0), 0) : 0;
+                html += `
+                    <div class="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm hover:shadow-md transition flex flex-col justify-between group">
+                        <div>
+                            <div class="flex justify-between items-start mb-4">
+                                <span class="bg-indigo-50 text-indigo-700 text-xs font-semibold px-3 py-1 rounded-full">
+                                    <i class="fa-regular fa-calendar mr-1"></i> ${formatDate(vac.startDate)} - ${formatDate(vac.endDate)}
+                                </span>
+                                <button onclick="deleteVacation('${vac.id}')" class="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg transition" title="Eliminar vacación">
+                                    <i class="fa-solid fa-trash-can text-sm"></i>
+                                </button>
+                            </div>
+                            <h3 class="text-xl font-bold text-slate-900 mb-2 group-hover:text-indigo-600 transition">${escapeHtml(vac.name)}</h3>
+                            <div class="flex items-center gap-2 text-sm text-slate-500 mb-4">
+                                <i class="fa-solid fa-users text-slate-400"></i>
+                                <span>${vac.participants.length} participantes (${vac.participants.map(p => escapeHtml(p)).join(', ')})</span>
+                            </div>
+                        </div>
+                        <div class="pt-4 border-t border-slate-100 flex items-center justify-between mt-4">
+                            <div>
+                                <span class="text-xs text-slate-400 block">Gastos totales</span>
+                                <span class="text-base font-bold text-slate-800">$${totalSpent.toLocaleString()}</span>
+                            </div>
+                            <button onclick="openVacation('${vac.id}')" class="bg-slate-900 hover:bg-indigo-600 text-white font-medium px-4 py-2 rounded-xl text-sm transition flex items-center gap-2">
+                                Ver viaje <i class="fa-solid fa-arrow-right text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+            container.innerHTML = html;
+        }
+
+        // --- WIZARD: CREATE VACATION (Step 1: Name and Dates) ---
+        let tempVacationData = { name: '', startDate: '', endDate: '', participants: [] };
+
+        function startCreateVacation() {
+            tempVacationData = { name: '', startDate: '', endDate: '', participants: ['Yo'] };
+            appState.currentView = 'create_step1';
+            render();
+        }
+
+        function renderCreateStep1View(container, headerActions) {
+            headerActions.innerHTML = `
+                <button onclick="appState.currentView='home'; render();" class="text-slate-600 hover:text-slate-900 text-sm font-medium flex items-center gap-2 px-3 py-2 rounded-xl">
+                    <i class="fa-solid fa-arrow-left"></i> Cancelar
+                </button>
+            `;
+
+            container.innerHTML = `
+                <div class="max-w-xl mx-auto w-full bg-white rounded-3xl p-8 border border-slate-200 shadow-sm my-auto">
+                    <div class="mb-6">
+                        <span class="text-xs font-bold text-indigo-600 uppercase tracking-wider block mb-1">Paso 1 de 2</span>
+                        <h2 class="text-2xl font-bold text-slate-900">¿A dónde nos vamos?</h2>
+                        <p class="text-sm text-slate-500">Ingresa el nombre del lugar y el rango de fechas de tu viaje.</p>
+                    </div>
+                    <form onsubmit="submitStep1(event)" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-1">Nombre o Lugar de las Vacaciones</label>
+                            <input type="text" id="vac-name" required placeholder="Ej: Bariloche 2026, Costa Atlántica..." value="${escapeHtml(tempVacationData.name)}"
+                                class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm">
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">Fecha de Inicio</label>
+                                <input type="date" id="vac-start" required value="${tempVacationData.startDate}"
+                                    class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">Fecha de Fin</label>
+                                <input type="date" id="vac-end" required value="${tempVacationData.endDate}"
+                                    class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm">
+                            </div>
+                        </div>
+                        <div class="pt-4 flex justify-end">
+                            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-3 rounded-xl shadow-md shadow-indigo-100 transition flex items-center gap-2 text-sm">
+                                Siguiente: Participantes <i class="fa-solid fa-arrow-right"></i>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `;
+        }
+
+        function submitStep1(e) {
+            e.preventDefault();
+            const name = document.getElementById('vac-name').value.trim();
+            const startDate = document.getElementById('vac-start').value;
+            const endDate = document.getElementById('vac-end').value;
+
+            if (new Date(startDate) > new Date(endDate)) {
+                showToast('La fecha de fin no puede ser anterior a la de inicio.', 'error');
+                return;
+            }
+
+            tempVacationData.name = name;
+            tempVacationData.startDate = startDate;
+            tempVacationData.endDate = endDate;
+            appState.currentView = 'create_step2';
+            render();
+        }
+
+        // --- WIZARD: CREATE VACATION (Step 2: Participants) ---
+        function renderCreateStep2View(container, headerActions) {
+            headerActions.innerHTML = `
+                <button onclick="appState.currentView='create_step1'; render();" class="text-slate-600 hover:text-slate-900 text-sm font-medium flex items-center gap-2 px-3 py-2 rounded-xl">
+                    <i class="fa-solid fa-arrow-left"></i> Volver
+                </button>
+            `;
+
+            let participantsHtml = tempVacationData.participants.map((p, idx) => `
+                <div class="flex items-center justify-between bg-slate-50 border border-slate-200 px-4 py-2.5 rounded-xl">
+                    <span class="text-sm font-medium text-slate-800">${escapeHtml(p)}</span>
+                    ${tempVacationData.participants.length > 1 ? `
+                        <button type="button" onclick="removeTempParticipant(${idx})" class="text-slate-400 hover:text-rose-600 text-sm">
+                            <i class="fa-solid fa-xmark"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <div class="max-w-xl mx-auto w-full bg-white rounded-3xl p-8 border border-slate-200 shadow-sm my-auto">
+                    <div class="mb-6">
+                        <span class="text-xs font-bold text-indigo-600 uppercase tracking-wider block mb-1">Paso 2 de 2</span>
+                        <h2 class="text-2xl font-bold text-slate-900">¿Quiénes viajan?</h2>
+                        <p class="text-sm text-slate-500">Agrega a los participantes para luego poder registrar quién paga cada gasto.</p>
+                    </div>
+                    <div class="space-y-4">
+                        <div class="flex gap-2">
+                            <input type="text" id="new-participant-input" placeholder="Nombre del participante..." 
+                                class="flex-1 px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm"
+                                onkeypress="if(event.key === 'Enter'){ event.preventDefault(); addTempParticipant(); }">
+                            <button type="button" onclick="addTempParticipant()" class="bg-slate-900 hover:bg-slate-800 text-white font-medium px-4 py-3 rounded-xl transition text-sm flex items-center gap-2">
+                                <i class="fa-solid fa-plus"></i> Agregar
+                            </button>
+                        </div>
+                        <div id="participants-list" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                            ${participantsHtml}
+                        </div>
+                        <div class="pt-4 flex justify-between items-center border-t border-slate-100">
+                            <span class="text-xs text-slate-400">Mínimo 1 participante</span>
+                            <button type="button" onclick="finalizeVacationCreation()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-3 rounded-xl shadow-md shadow-indigo-100 transition flex items-center gap-2 text-sm">
+                                <i class="fa-solid fa-check"></i> Finalizar y Crear Viaje
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function addTempParticipant() {
+            const input = document.getElementById('new-participant-input');
+            const val = input.value.trim();
+            if (!val) return;
+            if (tempVacationData.participants.includes(val)) {
+                showToast('Ese participante ya está agregado.', 'error');
+                return;
+            }
+            tempVacationData.participants.push(val);
+            render();
+            document.getElementById('new-participant-input').focus();
+        }
+
+        function removeTempParticipant(idx) {
+            tempVacationData.participants.splice(idx, 1);
+            render();
+        }
+
+        function finalizeVacationCreation() {
+            if (tempVacationData.participants.length === 0) {
+                showToast('Debes ingresar al menos un participante.', 'error');
+                return;
+            }
+
+            const newVac = {
+                id: 'vac_' + Date.now(),
+                name: tempVacationData.name,
+                startDate: tempVacationData.startDate,
+                endDate: tempVacationData.endDate,
+                participants: [...tempVacationData.participants],
+                expenses: [],
+                packingList: [],
+                shoppingList: [],
+                dayNotes: {}
+            };
+
+            appState.vacations.push(newVac);
+            appState.activeVacationId = newVac.id;
+            appState.currentView = 'vacation_detail';
+            saveData(appState);
+            showToast('¡Vacación creada con éxito!');
+            render();
+        }
+
+        function deleteVacation(id) {
+            if (!confirm('¿Estás seguro de eliminar estas vacaciones? Se perderán todos sus datos.')) return;
+            appState.vacations = appState.vacations.filter(v => v.id !== id);
+            if (appState.activeVacationId === id) appState.activeVacationId = null;
+            saveData(appState);
+            showToast('Vacación eliminada');
+            render();
+        }
+
+        function openVacation(id) {
+            appState.activeVacationId = id;
+            appState.currentView = 'vacation_detail';
+            render();
+        }
+
+
+        // --- VACATION DETAIL & TABS ---
+        let activeTab = 'expenses'; // 'expenses', 'packing', 'shopping', 'calendar'
+
+        function renderVacationDetailView(container, headerActions) {
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            if (!vac) {
+                appState.currentView = 'home';
+                render();
+                return;
+            }
+
+            headerActions.innerHTML = `
+                <button onclick="appState.currentView='home'; render();" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium px-4 py-2 rounded-xl text-sm transition flex items-center gap-2">
+                    <i class="fa-solid fa-arrow-left"></i> Volver al Menú
+                </button>
+            `;
+
+            container.innerHTML = `
+                <div class="mb-6">
+                    <div class="flex flex-col md:flex-row md:items-center justify-between gap-2">
+                        <div>
+                            <span class="text-xs font-semibold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
+                                Del ${formatDate(vac.startDate)} al ${formatDate(vac.endDate)}
+                            </span>
+                            <h2 class="text-3xl font-extrabold text-slate-900 mt-1">${escapeHtml(vac.name)}</h2>
+                        </div>
+                        <div class="flex items-center gap-2 text-sm text-slate-500 bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
+                            <i class="fa-solid fa-users text-indigo-600"></i>
+                            <span>Participantes: <strong class="text-slate-800">${vac.participants.map(p => escapeHtml(p)).join(', ')}</strong></span>
+                        </div>
+                    </div>
+
+                    <!-- TABS NAVIGATION -->
+                    <div class="flex flex-wrap gap-2 mt-6 border-b border-slate-200 pb-3">
+                        <button onclick="switchTab('expenses')" class="px-4 py-2.5 rounded-xl font-medium text-sm transition flex items-center gap-2 ${activeTab === 'expenses' ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}">
+                            <i class="fa-solid fa-receipt"></i> Gastos
+                        </button>
+                        <button onclick="switchTab('packing')" class="px-4 py-2.5 rounded-xl font-medium text-sm transition flex items-center gap-2 ${activeTab === 'packing' ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}">
+                            <i class="fa-solid fa-suitcase"></i> Cosas a Llevar
+                        </button>
+                        <button onclick="switchTab('shopping')" class="px-4 py-2.5 rounded-xl font-medium text-sm transition flex items-center gap-2 ${activeTab === 'shopping' ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}">
+                            <i class="fa-solid fa-cart-shopping"></i> Cosas a Comprar
+                        </button>
+                        <button onclick="switchTab('calendar')" class="px-4 py-2.5 rounded-xl font-medium text-sm transition flex items-center gap-2 ${activeTab === 'calendar' ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-100' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}">
+                            <i class="fa-solid fa-calendar-days"></i> Calendario y Notas
+                        </button>
+                    </div>
+                </div>
+
+                <!-- TAB CONTENT -->
+                <div id="tab-content" class="flex-1 flex flex-col"></div>
+            `;
+
+            renderTabContent();
+        }
+
+        function switchTab(tab) {
+            activeTab = tab;
+            renderVacationDetailView(document.querySelector('main'), document.getElementById('header-actions'));
+        }
+
+        function renderTabContent() {
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            const container = document.getElementById('tab-content');
+
+            if (activeTab === 'expenses') {
+                renderExpensesTab(container, vac);
+            } else if (activeTab === 'packing') {
+                renderListTab(container, vac, 'packingList', 'Cosas a Llevar', 'Ej: Protector solar, adaptador de corriente...');
+            } else if (activeTab === 'shopping') {
+                renderListTab(container, vac, 'shoppingList', 'Cosas a Comprar', 'Ej: Carbón para el asado, bebidas...');
+            } else if (activeTab === 'calendar') {
+                renderCalendarTab(container, vac);
+            }
+        }
+
+
+        // --- TAB 1: GASTOS ---
+        function renderExpensesTab(container, vac) {
+            const total = vac.expenses.reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+            const perPerson = vac.participants.length > 0 ? total / vac.participants.length : 0;
+
+            let optionsHtml = vac.participants.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join('');
+
+            let rowsHtml = '';
+            if (vac.expenses.length === 0) {
+                rowsHtml = `<tr><td colspan="4" class="text-center py-8 text-slate-400 text-sm">No hay gastos registrados todavía.</td></tr>`;
+            } else {
+                vac.expenses.forEach((exp, idx) => {
+                    rowsHtml += `
+                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition">
+                            <td class="py-3.5 px-4 font-bold text-slate-800">$${Number(exp.amount).toLocaleString()}</td>
+                            <td class="py-3.5 px-4 text-slate-600">${escapeHtml(exp.detail)}</td>
+                            <td class="py-3.5 px-4">
+                                <span class="bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                                    ${escapeHtml(exp.payer)}
+                                </span>
+                            </td>
+                            <td class="py-3.5 px-4 text-right">
+                                <button onclick="deleteExpense(${idx})" class="text-slate-400 hover:text-rose-600 p-1 rounded transition" title="Eliminar gasto">
+                                    <i class="fa-solid fa-trash-can text-sm"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+
+            container.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Form and Stats -->
+                    <div class="lg:col-span-1 space-y-6">
+                        <div class="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-900 mb-4">Agregar Gasto</h3>
+                            <form onsubmit="addExpense(event)" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Valor del Gasto ($)</label>
+                                    <input type="number" step="0.01" id="exp-amount" required placeholder="Ej: 15000"
+                                        class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Detalle (¿Para qué fue?)</label>
+                                    <input type="text" id="exp-detail" required placeholder="Ej: Supermercado, Peaje, Cena..."
+                                        class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">¿Quién lo pagó?</label>
+                                    <select id="exp-payer" required class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm bg-white">
+                                        <option value="" disabled selected>Selecciona un participante</option>
+                                        ${optionsHtml}
+                                    </select>
+                                </div>
+                                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl shadow-md shadow-indigo-100 transition flex items-center justify-center gap-2 text-sm">
+                                    <i class="fa-solid fa-plus"></i> Registrar Gasto
+                                </button>
+                            </form>
+                        </div>
+
+                        <!-- Summary Card -->
+                        <div class="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-3xl p-6 shadow-md">
+                            <h3 class="text-sm font-medium text-slate-300 uppercase tracking-wider mb-2">Resumen Financiero</h3>
+                            <div class="flex justify-between items-baseline mb-4 pb-4 border-b border-slate-800">
+                                <span class="text-slate-400 text-sm">Gasto Total</span>
+                                <span class="text-2xl font-bold">$${total.toLocaleString()}</span>
+                            </div>
+                            <div class="flex justify-between items-baseline">
+                                <span class="text-slate-400 text-sm">Promedio por persona</span>
+                                <span class="text-lg font-bold text-indigo-400">$${perPerson.toFixed(2)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Expenses Table -->
+                    <div class="lg:col-span-2 bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col">
+                        <h3 class="text-lg font-bold text-slate-900 mb-4">Listado de Gastos</h3>
+                        <div class="overflow-x-auto flex-1">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b border-slate-200 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                        <th class="py-3 px-4">Valor</th>
+                                        <th class="py-3 px-4">Detalle</th>
+                                        <th class="py-3 px-4">Pagó</th>
+                                        <th class="py-3 px-4 text-right">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rowsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function addExpense(e) {
+            e.preventDefault();
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            const amount = parseFloat(document.getElementById('exp-amount').value);
+            const detail = document.getElementById('exp-detail').value.trim();
+            const payer = document.getElementById('exp-payer').value;
+
+            if (isNaN(amount) || amount <= 0) {
+                showToast('Ingresa un valor válido.', 'error');
+                return;
+            }
+
+            vac.expenses.push({ amount, detail, payer });
+            saveData(appState);
+            showToast('Gasto agregado con éxito');
+            renderTabContent();
+        }
+
+        function deleteExpense(idx) {
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            vac.expenses.splice(idx, 1);
+            saveData(appState);
+            showToast('Gasto eliminado');
+            renderTabContent();
+        }
+
+
+        // --- TAB 2 & 3: COSAS A LLEVAR / COMPRAR ---
+        function renderListTab(container, vac, listKey, title, placeholder) {
+            const items = vac[listKey] || [];
+
+            let rowsHtml = '';
+            if (items.length === 0) {
+                rowsHtml = `<tr><td colspan="3" class="text-center py-8 text-slate-400 text-sm">No hay ítems cargados todavía.</td></tr>`;
+            } else {
+                items.forEach((item, idx) => {
+                    rowsHtml += `
+                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition">
+                            <td class="py-3.5 px-4 flex items-center gap-3">
+                                <input type="checkbox" ${item.completed ? 'checked' : ''} onclick="toggleItem('${listKey}', ${idx})"
+                                    class="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer">
+                                <span class="${item.completed ? 'line-through text-slate-400' : 'text-slate-800 font-medium'}">${escapeHtml(item.name)}</span>
+                            </td>
+                            <td class="py-3.5 px-4 text-slate-600 ${item.completed ? 'line-through text-slate-400' : ''}">${escapeHtml(item.detail || '-')}</td>
+                            <td class="py-3.5 px-4 text-right">
+                                <button onclick="deleteItem('${listKey}', ${idx})" class="text-slate-400 hover:text-rose-600 p-1 rounded transition" title="Eliminar ítem">
+                                    <i class="fa-solid fa-trash-can text-sm"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            }
+
+            container.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Form -->
+                    <div class="lg:col-span-1">
+                        <div class="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-900 mb-4">Añadir a ${title}</h3>
+                            <form onsubmit="addItem(event, '${listKey}')" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Ítem / Cosa</label>
+                                    <input type="text" id="item-name" required placeholder="${placeholder}"
+                                        class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Detalle o Notas</label>
+                                    <input type="text" id="item-detail" placeholder="Ej: Cantidad, marca, observaciones..."
+                                        class="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm">
+                                </div>
+                                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-3 rounded-xl shadow-md shadow-indigo-100 transition flex items-center justify-center gap-2 text-sm">
+                                    <i class="fa-solid fa-plus"></i> Agregar ítem
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Table -->
+                    <div class="lg:col-span-2 bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col">
+                        <h3 class="text-lg font-bold text-slate-900 mb-4">Lista: ${title}</h3>
+                        <div class="overflow-x-auto flex-1">
+                            <table class="w-full text-left border-collapse">
+                                <thead>
+                                    <tr class="border-b border-slate-200 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                        <th class="py-3 px-4">Ítem</th>
+                                        <th class="py-3 px-4">Detalle / Notas</th>
+                                        <th class="py-3 px-4 text-right">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rowsHtml}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function addItem(e, listKey) {
+            e.preventDefault();
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            const name = document.getElementById('item-name').value.trim();
+            const detail = document.getElementById('item-detail').value.trim();
+
+            if (!vac[listKey]) vac[listKey] = [];
+            vac[listKey].push({ name, detail, completed: false });
+            saveData(appState);
+            showToast('Ítem agregado');
+            renderTabContent();
+        }
+
+        function toggleItem(listKey, idx) {
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            vac[listKey][idx].completed = !vac[listKey][idx].completed;
+            saveData(appState);
+            renderTabContent();
+        }
+
+        function deleteItem(listKey, idx) {
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            vac[listKey].splice(idx, 1);
+            saveData(appState);
+            showToast('Ítem eliminado');
+            renderTabContent();
+        }
+
+
+        // --- TAB 4: CALENDAR & NOTES ---
+        let currentCalendarDate = new Date();
+
+        function renderCalendarTab(container, vac) {
+            // Parse start and end dates ensuring local timezone compatibility
+            const startDateStr = vac.startDate;
+            const endDateStr = vac.endDate;
+
+            // Render header range banner
+            let bannerHtml = `
+                <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 mb-6 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center">
+                            <i class="fa-solid fa-calendar-days"></i>
+                        </div>
+                        <div>
+                            <span class="text-xs text-indigo-500 font-semibold uppercase tracking-wider block">Franja de Vacaciones</span>
+                            <span class="text-base font-bold text-slate-900">Del ${formatDate(startDateStr)} al ${formatDate(endDateStr)}</span>
+                        </div>
+                    </div>
+                    <span class="text-xs text-slate-500 hidden sm:inline">Haz clic en cualquier día para agregar o ver notas</span>
+                </div>
+            `;
+
+            // Setup Month Grid Navigation
+            const year = currentCalendarDate.getFullYear();
+            const month = currentCalendarDate.getMonth();
+
+            const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+            
+            const firstDayIndex = new Date(year, month, 1).getDay();
+            // Adjust so week starts on Monday (0 = Monday, 6 = Sunday)
+            const adjustedFirstDay = (firstDayIndex === 0) ? 6 : firstDayIndex - 1;
+            const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
+
+            let daysGridHtml = '';
+            const dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+            dayNames.forEach(d => {
+                daysGridHtml += `<div class="text-center font-bold text-xs text-slate-400 py-2">${d}</div>`;
+            });
+
+            // Blank slots for previous month
+            for (let i = 0; i < adjustedFirstDay; i++) {
+                daysGridHtml += `<div class="h-24 sm:h-28 bg-slate-50/50 rounded-xl border border-slate-100 opacity-30"></div>`;
+            }
+
+            const startVacTime = new Date(startDateStr + 'T00:00:00').getTime();
+            const endVacTime = new Date(endDateStr + 'T23:59:59').getTime();
+
+            for (let day = 1; day <= totalDaysInMonth; day++) {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const dateTime = new Date(dateStr + 'T12:00:00').getTime();
+                
+                const isVacationDay = dateTime >= startVacTime && dateTime <= endVacTime;
+                const hasNote = vac.dayNotes && vac.dayNotes[dateStr] && vac.dayNotes[dateStr].trim().length > 0;
+
+                daysGridHtml += `
+                    <div onclick="openDayNoteModal('${dateStr}')" 
+                        class="h-24 sm:h-28 p-2 rounded-2xl border transition flex flex-col justify-between cursor-pointer relative group ${
+                            isVacationDay 
+                                ? 'bg-indigo-50/70 border-indigo-200 hover:bg-indigo-100 shadow-sm' 
+                                : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                        }">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm font-bold ${isVacationDay ? 'text-indigo-700' : 'text-slate-700'}">${day}</span>
+                            ${isVacationDay ? '<span class="w-2 h-2 rounded-full bg-indigo-600" title="Día de vacaciones"></span>' : ''}
+                        </div>
+                        ${hasNote ? `
+                            <div class="bg-amber-100 text-amber-800 text-[10px] font-medium px-2 py-1 rounded-lg truncate shadow-xs">
+                                <i class="fa-solid fa-note-sticky mr-1"></i> ${escapeHtml(vac.dayNotes[dateStr])}
+                            </div>
+                        ` : `
+                            <div class="text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 transition italic">
+                                + Agregar nota
+                            </div>
+                        `}
+                    </div>
+                `;
+            }
+
+            container.innerHTML = `
+                <div class="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col">
+                    ${bannerHtml}
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="text-xl font-bold text-slate-900">${monthNames[month]} ${year}</h3>
+                        <div class="flex items-center gap-2">
+                            <button onclick="changeMonth(-1)" class="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition">
+                                <i class="fa-solid fa-chevron-left text-sm"></i>
+                            </button>
+                            <button onclick="changeMonth(1)" class="p-2.5 rounded-xl border border-slate-200 hover:bg-slate-100 text-slate-600 transition">
+                                <i class="fa-solid fa-chevron-right text-sm"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-7 gap-2">
+                        ${daysGridHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        function changeMonth(direction) {
+            currentCalendarDate.setMonth(currentCalendarDate.getMonth() + direction);
+            renderTabContent();
+        }
+
+        function openDayNoteModal(dateStr) {
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            const currentNote = (vac.dayNotes && vac.dayNotes[dateStr]) ? vac.dayNotes[dateStr] : '';
+
+            const modalRoot = document.getElementById('modal-root');
+            modalRoot.innerHTML = `
+                <div class="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+                    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-xl border border-slate-200 transform transition-all">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold text-slate-900">Nota para el día ${formatDate(dateStr)}</h3>
+                            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 p-1">
+                                <i class="fa-solid fa-xmark text-lg"></i>
+                            </button>
+                        </div>
+                        <form onsubmit="saveDayNote(event, '${dateStr}')" class="space-y-4">
+                            <textarea id="day-note-text" rows="4" placeholder="Escribe planes, excursiones o notas para este día..."
+                                class="w-full p-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-800 text-sm">${escapeHtml(currentNote)}</textarea>
+                            <div class="flex justify-end gap-2">
+                                <button type="button" onclick="closeModal()" class="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-100 text-sm font-medium transition">
+                                    Cancelar
+                                </button>
+                                <button type="submit" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium shadow-md shadow-indigo-100 transition">
+                                    Guardar Nota
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        function closeModal() {
+            document.getElementById('modal-root').innerHTML = '';
+        }
+
+        function saveDayNote(e, dateStr) {
+            e.preventDefault();
+            const vac = appState.vacations.find(v => v.id === appState.activeVacationId);
+            const text = document.getElementById('day-note-text').value.trim();
+
+            if (!vac.dayNotes) vac.dayNotes = {};
+            vac.dayNotes[dateStr] = text;
+
+            saveData(appState);
+            closeModal();
+            showToast('Nota guardada correctamente');
+            renderTabContent();
+        }
+
+
+        // --- UTILS ---
+        function formatDate(dateString) {
+            if (!dateString) return '';
+            const parts = dateString.split('-');
+            if (parts.length !== 3) return dateString;
+            return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, "&amp;")
+                      .replace(/</g, "&lt;")
+                      .replace(/>/g, "&gt;")
+                      .replace(/"/g, "&quot;")
+                      .replace(/'/g, "&#039;");
+        }
+
+        // Initialize App on Load
+        window.onload = function() {
+            render();
+        };
+    </script>
+</body>
+</html>
